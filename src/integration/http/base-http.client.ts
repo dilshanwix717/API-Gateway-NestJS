@@ -10,9 +10,15 @@ import { ServiceResponse } from '../../interfaces/service-response.interface.js'
 import { TRACE_ID_HEADER } from '../../utils/constants.js';
 import { AppConfig } from '../../config/app.config.js';
 
+/**
+ * Base class for all HTTP clients that call external services.
+ * Provides built-in retry logic, circuit breaker pattern, and consistent error handling.
+ */
+
 export abstract class BaseHttpClient {
-  protected readonly logger: Logger;
-  protected readonly baseUrl: string;
+  protected readonly logger: Logger; // For logging debug/error messages
+  protected readonly baseUrl: string; // The base URL of the external service
+  // Circuit breaker prevents calling a failing service repeatedly
   private readonly circuitBreaker: CircuitBreaker<[string, AxiosRequestConfig], AxiosResponse>;
 
   constructor(
@@ -24,13 +30,15 @@ export abstract class BaseHttpClient {
     this.logger = new Logger(serviceName);
     this.baseUrl = baseUrl;
 
+    // Get circuit breaker settings from config, or use sensible defaults
     const appCfg = this.configService.get<AppConfig>('app');
     const cbConfig = appCfg?.circuitBreaker ?? {
-      timeout: 5000,
-      errorThresholdPercentage: 50,
-      resetTimeout: 30000,
+      timeout: 5000, // Max time to wait for response
+      errorThresholdPercentage: 50, // Open circuit if 50% of requests fail
+      resetTimeout: 30000, // Try again after 30 seconds
     };
 
+    // Create circuit breaker that wraps our HTTP requests
     this.circuitBreaker = createCircuitBreaker(
       (url: string, config: AxiosRequestConfig) => this.executeRequest(url, config),
       serviceName,
@@ -39,11 +47,19 @@ export abstract class BaseHttpClient {
     );
   }
 
+  // Executes the actual HTTP request and converts RxJS Observable to Promise
   private async executeRequest(url: string, config: AxiosRequestConfig): Promise<AxiosResponse> {
     const response$ = this.httpService.request({ ...config, url });
-    return firstValueFrom(response$);
+    return firstValueFrom(response$); // Convert Observable to Promise
   }
 
+  /**
+   * Core method that sends HTTP requests with retry and circuit breaker protection.
+   * @param method - HTTP method (GET, POST, PUT, DELETE)
+   * @param path - API endpoint path (e.g., '/users/123')
+   * @param traceId - Unique ID for tracking requests across services
+   * @param data - Request body data (optional)
+   */
   protected async request<T>(
     method: string,
     path: string,
@@ -51,10 +67,12 @@ export abstract class BaseHttpClient {
     data?: unknown,
   ): Promise<ServiceResponse<T>> {
     const url = `${this.baseUrl}${path}`;
+
+    // Build the request configuration
     const config: AxiosRequestConfig = {
       method,
       headers: {
-        [TRACE_ID_HEADER]: traceId,
+        [TRACE_ID_HEADER]: traceId, // Pass trace ID for distributed tracing
         'Content-Type': 'application/json',
       },
       data,
@@ -62,12 +80,14 @@ export abstract class BaseHttpClient {
     };
 
     try {
+      // Attempt request with automatic retries (up to 2 times) if it fails
       const response = await retryWithBackoff(
         () => this.circuitBreaker.fire(url, config),
         { maxRetries: 2 },
         this.logger,
       );
 
+      // Parse and return the response in a standard format
       const body = response.data as ServiceResponse<T>;
       return {
         success: body.success ?? true,
@@ -76,6 +96,7 @@ export abstract class BaseHttpClient {
         statusCode: response.status,
       };
     } catch (error) {
+      // If all retries fail, return a standardized error response
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`Request failed: ${method} ${url} - ${message}`);
 
@@ -88,10 +109,14 @@ export abstract class BaseHttpClient {
     }
   }
 
+  // Convenience methods for common HTTP verbs
+
+  // GET - Retrieve data from the service
   protected async get<T>(path: string, traceId: string): Promise<ServiceResponse<T>> {
     return this.request<T>('GET', path, traceId);
   }
 
+  // POST - Create new data or trigger an action
   protected async post<T>(
     path: string,
     traceId: string,
@@ -100,6 +125,7 @@ export abstract class BaseHttpClient {
     return this.request<T>('POST', path, traceId, data);
   }
 
+  // PUT - Update existing data
   protected async put<T>(
     path: string,
     traceId: string,
@@ -108,6 +134,7 @@ export abstract class BaseHttpClient {
     return this.request<T>('PUT', path, traceId, data);
   }
 
+  // DELETE - Remove data from the service
   protected async delete<T>(path: string, traceId: string): Promise<ServiceResponse<T>> {
     return this.request<T>('DELETE', path, traceId);
   }
