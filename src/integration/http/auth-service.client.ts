@@ -10,6 +10,7 @@ import { AppConfig } from '../../config/app.config.js';
 export interface AuthSignupResponse {
   user_id: string; // The newly created user's ID
   token: string; // JWT token for immediate authentication
+  refresh_token: string; // Refresh token for token rotation
 }
 
 export interface AuthLoginResponse {
@@ -45,7 +46,40 @@ export class AuthServiceClient extends BaseHttpClient {
     data: { email: string; password: string },
     traceId: string,
   ): Promise<ServiceResponse<AuthSignupResponse>> {
-    return this.post<AuthSignupResponse>('/auth/signup', traceId, data);
+    // Auth service expects { email, password, confirmPassword } at /v1/auth/register
+    // and wraps response in { success, data: { accessToken, refreshToken, userId, ... } }
+    const rawResponse = await this.post<{
+      accessToken: string;
+      refreshToken: string;
+      userId: string;
+      expiresIn: number;
+      tokenType: string;
+    }>('/v1/auth/register', traceId, {
+      email: data.email,
+      password: data.password,
+      confirmPassword: data.password,
+    });
+
+    // Map auth service response shape to gateway's expected shape
+    if (rawResponse.success && rawResponse.data) {
+      return {
+        success: true,
+        message: rawResponse.message,
+        data: {
+          user_id: rawResponse.data.userId,
+          token: rawResponse.data.accessToken,
+          refresh_token: rawResponse.data.refreshToken,
+        },
+        statusCode: rawResponse.statusCode,
+      };
+    }
+
+    return {
+      success: false,
+      message: rawResponse.message,
+      data: null,
+      statusCode: rawResponse.statusCode,
+    };
   }
 
   // Authenticate user and get access + refresh tokens
@@ -53,7 +87,34 @@ export class AuthServiceClient extends BaseHttpClient {
     data: { email: string; password: string },
     traceId: string,
   ): Promise<ServiceResponse<AuthLoginResponse>> {
-    return this.post<AuthLoginResponse>('/auth/login', traceId, data);
+    // Auth service returns { accessToken, refreshToken, userId, expiresIn, tokenType }
+    const rawResponse = await this.post<{
+      accessToken: string;
+      refreshToken: string;
+      userId: string;
+      expiresIn: number;
+      tokenType: string;
+    }>('/v1/auth/login', traceId, data);
+
+    // Map to gateway's expected shape
+    if (rawResponse.success && rawResponse.data) {
+      return {
+        success: true,
+        message: rawResponse.message,
+        data: {
+          token: rawResponse.data.accessToken,
+          refresh_token: rawResponse.data.refreshToken,
+        },
+        statusCode: rawResponse.statusCode,
+      };
+    }
+
+    return {
+      success: false,
+      message: rawResponse.message,
+      data: null,
+      statusCode: rawResponse.statusCode,
+    };
   }
 
   // Check if a JWT token is valid and not revoked/banned
@@ -61,7 +122,32 @@ export class AuthServiceClient extends BaseHttpClient {
     token: string,
     traceId: string,
   ): Promise<ServiceResponse<AuthValidateResponse>> {
-    return this.post<AuthValidateResponse>('/auth/validate-token', traceId, { token });
+    // Auth service validate-token returns { valid, payload, reason }
+    const rawResponse = await this.post<{
+      valid: boolean;
+      payload?: { sub: string };
+      reason?: string;
+    }>('/v1/auth/validate-token', traceId, { token });
+
+    if (rawResponse.success && rawResponse.data) {
+      return {
+        success: true,
+        message: rawResponse.message,
+        data: {
+          valid: rawResponse.data.valid,
+          revoked: rawResponse.data.reason === 'blacklisted' || rawResponse.data.reason === 'token_revoked',
+          banned: rawResponse.data.reason === 'account_banned',
+        },
+        statusCode: rawResponse.statusCode,
+      };
+    }
+
+    return {
+      success: false,
+      message: rawResponse.message,
+      data: null,
+      statusCode: rawResponse.statusCode,
+    };
   }
 
   // Exchange a refresh token for new access + refresh tokens
@@ -69,18 +155,46 @@ export class AuthServiceClient extends BaseHttpClient {
     refreshToken: string,
     traceId: string,
   ): Promise<ServiceResponse<AuthRefreshResponse>> {
-    return this.post<AuthRefreshResponse>('/auth/refresh-token', traceId, {
-      refresh_token: refreshToken,
+    // Auth service expects { refreshToken } (camelCase)
+    const rawResponse = await this.post<{
+      accessToken: string;
+      refreshToken: string;
+      expiresIn: number;
+      tokenType: string;
+    }>('/v1/auth/refresh-token', traceId, {
+      refreshToken: refreshToken,
     });
+
+    if (rawResponse.success && rawResponse.data) {
+      return {
+        success: true,
+        message: rawResponse.message,
+        data: {
+          token: rawResponse.data.accessToken,
+          refresh_token: rawResponse.data.refreshToken,
+        },
+        statusCode: rawResponse.statusCode,
+      };
+    }
+
+    return {
+      success: false,
+      message: rawResponse.message,
+      data: null,
+      statusCode: rawResponse.statusCode,
+    };
   }
 
   // Invalidate the user's token (mark it as revoked)
-  async logout(token: string, traceId: string): Promise<ServiceResponse<null>> {
-    return this.post<null>('/auth/logout', traceId, { token });
+  async logout(accessToken: string, refreshToken: string, traceId: string): Promise<ServiceResponse<null>> {
+    // Auth service expects { refreshToken } in body and access token in Authorization header
+    return this.postWithAuthHeader<null>('/v1/auth/logout', traceId, {
+      refreshToken: refreshToken,
+    }, accessToken);
   }
 
-  // Remove a user's auth data from the auth service
+  // Remove a user's auth data from the auth service (compensating transaction)
   async deleteUser(userId: string, traceId: string): Promise<ServiceResponse<null>> {
-    return this.delete<null>(`/auth/users/${userId}`, traceId);
+    return this.delete<null>(`/v1/accounts/${userId}/credentials`, traceId);
   }
 }

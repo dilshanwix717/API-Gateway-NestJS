@@ -69,14 +69,16 @@ export abstract class BaseHttpClient {
     const url = `${this.baseUrl}${path}`;
 
     // Build the request configuration
+    const appCfg = this.configService.get<AppConfig>('app');
     const config: AxiosRequestConfig = {
       method,
       headers: {
         [TRACE_ID_HEADER]: traceId, // Pass trace ID for distributed tracing
         'Content-Type': 'application/json',
+        'X-Internal-API-Key': appCfg?.internalApiKey ?? '', // Service-to-service auth
       },
       data,
-      timeout: this.configService.get<AppConfig>('app')?.requestTimeout ?? 10000,
+      timeout: appCfg?.requestTimeout ?? 10000,
     };
 
     try {
@@ -137,5 +139,69 @@ export abstract class BaseHttpClient {
   // DELETE - Remove data from the service
   protected async delete<T>(path: string, traceId: string): Promise<ServiceResponse<T>> {
     return this.request<T>('DELETE', path, traceId);
+  }
+
+  // POST with an additional Authorization Bearer header
+  protected async postWithAuthHeader<T>(
+    path: string,
+    traceId: string,
+    data: unknown,
+    bearerToken: string,
+  ): Promise<ServiceResponse<T>> {
+    return this.requestWithExtraHeaders<T>('POST', path, traceId, data, {
+      Authorization: `Bearer ${bearerToken}`,
+    });
+  }
+
+  /**
+   * Like request() but allows merging additional headers.
+   */
+  protected async requestWithExtraHeaders<T>(
+    method: string,
+    path: string,
+    traceId: string,
+    data: unknown,
+    extraHeaders: Record<string, string>,
+  ): Promise<ServiceResponse<T>> {
+    const url = `${this.baseUrl}${path}`;
+    const appCfg = this.configService.get<AppConfig>('app');
+
+    const config: AxiosRequestConfig = {
+      method,
+      headers: {
+        [TRACE_ID_HEADER]: traceId,
+        'Content-Type': 'application/json',
+        'X-Internal-API-Key': appCfg?.internalApiKey ?? '',
+        ...extraHeaders,
+      },
+      data,
+      timeout: appCfg?.requestTimeout ?? 10000,
+    };
+
+    try {
+      const response = await retryWithBackoff(
+        () => this.circuitBreaker.fire(url, config),
+        { maxRetries: 2 },
+        this.logger,
+      );
+
+      const body = response.data as ServiceResponse<T>;
+      return {
+        success: body.success ?? true,
+        message: body.message ?? 'OK',
+        data: body.data ?? null,
+        statusCode: response.status,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Request failed: ${method} ${url} - ${message}`);
+
+      return {
+        success: false,
+        message,
+        data: null,
+        statusCode: 500,
+      };
+    }
   }
 }

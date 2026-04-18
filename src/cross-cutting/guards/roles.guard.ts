@@ -18,7 +18,9 @@ export class RolesGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const userRoles = request.user?.roles ?? [];
 
-    const hasRole = requiredRoles.some((role) => userRoles.includes(role));
+    // Case-insensitive comparison — Auth Service stores roles as uppercase, Gateway defines as lowercase
+    const normalizedUserRoles = userRoles.map((r: string) => r.toLowerCase());
+    const hasRole = requiredRoles.some((role) => normalizedUserRoles.includes(role.toLowerCase()));
     if (!hasRole) {
       throw new ForbiddenException('Insufficient permissions');
     }

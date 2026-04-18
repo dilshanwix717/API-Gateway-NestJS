@@ -13,7 +13,7 @@ export class SelfOrAdminGuard implements CanActivate {
       throw new ForbiddenException('User context not found');
     }
 
-    const isAdmin = user.roles?.includes(ROLES.ADMIN);
+    const isAdmin = user.roles?.some((r: string) => r.toLowerCase() === ROLES.ADMIN.toLowerCase());
     const isSelf = user.sub === paramId;
 
     if (!isAdmin && !isSelf) {

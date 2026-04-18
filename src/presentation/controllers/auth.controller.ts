@@ -68,12 +68,14 @@ export class AuthController {
   @ApiOperation({ summary: 'Logout and invalidate token' })
   @SwaggerResponse({ status: 200, description: 'Logged out successfully' })
   async logout(
+    @Body() body: { refresh_token: string },
     @Headers('authorization') authHeader: string,
     @Headers(TRACE_ID_HEADER) traceId: string,
   ) {
-    // Strip the "Bearer " prefix to get the raw token
-    const token = authHeader?.replace('Bearer ', '') ?? '';
-    await this.authBusiness.logout(token, traceId);
+    // Strip the "Bearer " prefix to get the raw access token
+    const accessToken = authHeader?.replace('Bearer ', '') ?? '';
+    const refreshToken = body?.refresh_token ?? '';
+    await this.authBusiness.logout(accessToken, refreshToken, traceId);
     return { message: 'Logged out successfully' };
   }
 }

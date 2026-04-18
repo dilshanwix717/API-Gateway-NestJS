@@ -29,4 +29,6 @@ export const configValidationSchema = Joi.object({
   REQUEST_TIMEOUT: Joi.number().default(10000),
 
   CACHE_TTL_SECONDS: Joi.number().default(300),
+
+  INTERNAL_API_KEY: Joi.string().required(),
 });

@@ -10,6 +10,7 @@ import { ROUTING_KEYS } from '../../utils/constants.js';
 export interface SignupResult {
   user_id: string;
   token: string;
+  refresh_token: string;
 }
 
 export interface SignupInput {
@@ -93,6 +94,7 @@ export class SignupOrchestratorService {
     return {
       user_id: authData.user_id,
       token: authData.token,
+      refresh_token: authData.refresh_token,
     };
   }
 }

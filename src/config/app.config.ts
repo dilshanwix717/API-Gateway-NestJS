@@ -43,6 +43,7 @@ export interface AppConfig {
 
   requestTimeout: number;
   cacheTtlSeconds: number;
+  internalApiKey: string;
 }
 
 // Register configuration under namespace "app"
@@ -54,8 +55,17 @@ export const appConfig = registerAs(
     nodeEnv: process.env['NODE_ENV'] ?? 'development',
 
     // JWT verification key (public key for RS256)
+    // Support both PEM format (with \n) and base64-encoded PEM
     jwt: {
-      publicKey: process.env['JWT_PUBLIC_KEY'] ?? '',
+      publicKey: (() => {
+        const raw = process.env['JWT_PUBLIC_KEY'] ?? '';
+        // If it looks like base64 (no PEM header), decode it
+        if (!raw.includes('-----BEGIN')) {
+          return Buffer.from(raw, 'base64').toString('utf-8');
+        }
+        // Otherwise replace escaped newlines with actual newlines
+        return raw.replace(/\\n/g, '\n');
+      })(),
     },
 
     // Downstream microservices
@@ -104,5 +114,8 @@ export const appConfig = registerAs(
 
     // Default cache TTL (seconds)
     cacheTtlSeconds: parseInt(process.env['CACHE_TTL_SECONDS'] ?? '300', 10),
+
+    // Shared secret for internal service-to-service API calls
+    internalApiKey: process.env['INTERNAL_API_KEY'] ?? '',
   }),
 );

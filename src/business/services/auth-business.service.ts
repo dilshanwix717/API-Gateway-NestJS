@@ -70,11 +70,12 @@ export class AuthBusinessService {
   }
 
   /**
-   * Invalidates the user's token on the auth service.
+   * Invalidates the user's tokens on the auth service.
+   * Sends both access token and refresh token for proper revocation.
    * Logs a warning if logout fails but doesn't throw (best-effort logout).
    */
-  async logout(token: string, traceId: string): Promise<void> {
-    const response = await this.authClient.logout(token, traceId);
+  async logout(accessToken: string, refreshToken: string, traceId: string): Promise<void> {
+    const response = await this.authClient.logout(accessToken, refreshToken, traceId);
 
     // Don't throw on logout failure - just log it
     // User experience shouldn't be blocked by logout issues

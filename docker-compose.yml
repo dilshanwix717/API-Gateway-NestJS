@@ -1,33 +1,34 @@
-version: '3.8'
 
 services:
-  api-gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - '3000:3000'
-    environment:
-      - NODE_ENV=development
-      - PORT=3000
-      - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
-      - AUTH_SERVICE_URL=http://auth-service:3001
-      - USER_SERVICE_URL=http://user-service:3002
-      - VIDEO_SERVICE_URL=http://video-service:3003
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - JAEGER_ENDPOINT=http://jaeger:14268/api/traces
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - gateway-net
+  # api-gateway:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - '3000:3000'
+  #   environment:
+  #     - NODE_ENV=development
+  #     - PORT=3000
+  #     - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+  #     - AUTH_SERVICE_URL=http://auth-service:3001
+  #     - USER_SERVICE_URL=http://user-service:3002
+  #     - VIDEO_SERVICE_URL=http://video-service:3003
+  #     - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - JAEGER_ENDPOINT=http://jaeger:14268/api/traces
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - gateway-net
+
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
     ports:
       - '5672:5672'
       - '15672:15672'
@@ -37,10 +38,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - gateway-net
+      - shared-net
 
   redis:
     image: redis:7-alpine
+    container_name: redis
     ports:
       - '6379:6379'
     healthcheck:
@@ -49,18 +51,19 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - gateway-net
+      - shared-net
 
   jaeger:
     image: jaegertracing/all-in-one:1.53
+    container_name: jaeger
     ports:
       - '16686:16686'
       - '14268:14268'
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     networks:
-      - gateway-net
+      - shared-net
 
 networks:
-  gateway-net:
-    driver: bridge
+  shared-net:
+    name: shared-net
